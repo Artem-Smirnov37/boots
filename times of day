@@ -1,0 +1,68 @@
+import pandas as pd
+import requests
+import json
+
+token = 'y0_AQAAAABjzbrxAAhSRgAAAADLeXue6m1bxVOZSMiw5nR6v6aekQcMVz8'  
+headers = {'Authorization': 'OAuth ' + token}
+
+params = {'metrics': 'ym:s:visits, ym:s:robotPercentage', 
+          'dimensions': 'ym:s:lastTrafficSource,ym:s:startOfHour',  
+          'date1': '2019-05-01',  
+          'date2': '2019-05-31', 
+          'ids': 30177909, 
+          'accuracy':'full',
+          'limit':100000
+          }
+
+response = requests.get('https://api-metrika.yandex.net/stat/v1/data', params=params, headers=headers)
+print (response.status_code)
+
+metric_data = response.json()
+
+def getMetricDataForDF(metric_data):
+    list_of_dict = []
+    dimensions_list = metric_data['query']['dimensions']
+    metrics_list = metric_data['query']['metrics']
+    for data_item in metric_data['data']:
+        d = {}
+        for i,dimensions in enumerate(data_item['dimensions']):
+            d[dimensions_list[i]] = dimensions['name']
+        for i,metric in enumerate(data_item['metrics']):
+            d[metrics_list[i]] = metric
+        list_of_dict.append(d)
+    return list_of_dict
+
+metric_list = getMetricDataForDF(metric_data)
+
+metric_df = pd.DataFrame(metric_list)
+
+metric_df.columns = ['Source', 'Time', 'Visits', 'RobotPercentage']
+metric_df['Time'] = pd.to_datetime(metric_df['Time'])
+metric_df['Time'] = metric_df['Time'].dt.hour
+
+def times_of_day(metric_df_time):
+    timesOfDay = []
+    for t in metric_df_time:
+        if t in [5,6,7,8,9,10]:
+            timesOfDay.append('Утро')
+        elif t in [11,12,13,14,15,16]:
+            timesOfDay.append('День')
+        elif t in [17,18,19,20,21,22]:
+            timesOfDay.append('Вечер')
+        else:
+            timesOfDay.append('Ночь')
+    return timesOfDay
+
+metric_df['Time'] = times_of_day(metric_df['Time'])
+metric_df['CountRobot'] = metric_df['Visits'] * metric_df['RobotPercentage'] / 100
+
+cntRobots = metric_df.groupby('Source')['Visits','CountRobot'].sum()
+sumRobot = cntRobots['CountRobot'] / cntRobots['Visits'] * 100
+x = cntRobots['CountRobot'].sum()
+y = cntRobots['Visits'].sum()
+print(sumRobot) # процент роботов по отдельным трафикам 
+print('Общий процент роботов на трафике составил: ' , x/y*100)
+
+time_of_robot = metric_df.groupby('Time')['CountRobot'].sum().sort_values()
+
+print(time_of_robot) # количество ботов в разрезе суток
